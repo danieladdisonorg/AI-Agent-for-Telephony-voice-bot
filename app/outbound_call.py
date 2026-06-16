@@ -10,9 +10,8 @@ from vocode.streaming.models.telephony import TwilioConfig
 from vocode.streaming.telephony.config_manager.redis_config_manager import RedisConfigManager
 from vocode.streaming.telephony.conversation.outbound_call import OutboundCall
 
-# ElevenLabsSynthesizerConfig
-from vocode.streaming.synthesizer.eleven_labs_synthesizer import ElevenLabsSynthesizerConfig
-from vocode.streaming.synthesizer.eleven_labs_synthesizer import AudioEncoding
+# TTS provider selection (ElevenLabs by default, 60db via TTS_PROVIDER=60db)
+from .tts_config import get_synthesizer_config
 
 load_dotenv()
 
@@ -35,12 +34,7 @@ async def main():
             account_sid=os.environ["TWILIO_ACCOUNT_SID"],
             auth_token=os.environ["TWILIO_AUTH_TOKEN"],
         ),
-        synthesizer_config=ElevenLabsSynthesizerConfig(
-            api_key=os.environ["ELEVEN_LABS_API_KEY"],
-            voice_id=os.environ["ELEVEN_LABS_VOICE_ID"],
-            sampling_rate=8000,
-            audio_encoding=AudioEncoding.MULAW,
-        ),
+        synthesizer_config=get_synthesizer_config(experimental_websocket=False),
 )
 
     input("Press enter to start call...")

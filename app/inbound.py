@@ -26,8 +26,9 @@ from vocode.streaming.telephony.server.base import TelephonyServer, TwilioInboun
 from vocode.streaming.models.events import EventType
 from .voice_bot_events_manager import VoiceBotEventsManager, SESSION_COUNTER, SESSION_GAUGE
 
-from vocode.streaming.synthesizer.eleven_labs_synthesizer import ElevenLabsSynthesizerConfig
-from vocode.streaming.synthesizer.eleven_labs_synthesizer import AudioEncoding
+# TTS provider selection (ElevenLabs by default, 60db via TTS_PROVIDER=60db)
+from .tts_config import get_synthesizer_config
+from .synthesizer_factory import VoiceBotSynthesizerFactory
 
 from vocode.streaming.action.dtmf import TwilioDTMF
 
@@ -75,6 +76,9 @@ system_prompt = get_system_prompt()
 telephony_server = TelephonyServer(
     base_url=BASE_URI,
     config_manager=config_manager,
+    # Custom factory so the server can build the 60db synthesizer in addition to
+    # the built-in providers (ElevenLabs etc.).
+    synthesizer_factory=VoiceBotSynthesizerFactory(),
     events_manager=VoiceBotEventsManager(
         subscriptions=[
             EventType.PHONE_CALL_CONNECTED,
@@ -110,14 +114,7 @@ telephony_server = TelephonyServer(
                 account_sid=os.environ["TWILIO_ACCOUNT_SID"],
                 auth_token=os.environ["TWILIO_AUTH_TOKEN"],          
             ),
-            synthesizer_config=ElevenLabsSynthesizerConfig(
-                api_key=os.environ["ELEVEN_LABS_API_KEY"],
-                voice_id=os.environ["ELEVEN_LABS_VOICE_ID"],
-                sampling_rate=8000,
-                audio_encoding=AudioEncoding.MULAW,
-                experimental_streaming=True,
-                experimental_websocket=True
-            ),
+            synthesizer_config=get_synthesizer_config(experimental_websocket=True),
         )
     ],
 )

@@ -1,6 +1,6 @@
 # AI Agent for Telephony - Voice Bot
 
-A production-ready conversational AI telephony system built on Vocode, integrating Deepgram, OpenAI, and ElevenLabs to deliver natural voice interactions for inbound and outbound phone calls.
+A production-ready conversational AI telephony system built on Vocode, integrating Deepgram, OpenAI, and a pluggable text-to-speech layer (ElevenLabs or [60db](https://60db.ai)) to deliver natural voice interactions for inbound and outbound phone calls.
 
 ## Overview
 
@@ -13,12 +13,13 @@ This AI-powered telephony solution enables businesses to deploy intelligent voic
 - **Scalable Architecture**: Docker-based deployment with Kubernetes support
 - **Comprehensive Monitoring**: Built-in Prometheus metrics and observability
 - **Flexible Configuration**: Customizable agents, transcribers, and synthesizers
+- **Pluggable TTS**: Switch between ElevenLabs and 60db with a single environment variable — no code changes
 
 ## Architecture
 
 The system leverages the following technology stack:
 
-- **Voice Processing**: Deepgram for speech transcription, ElevenLabs for synthesis
+- **Voice Processing**: Deepgram for speech transcription; ElevenLabs **or** 60db for synthesis (selectable via `TTS_PROVIDER`)
 - **AI Engine**: OpenAI for conversational intelligence
 - **Telephony**: Twilio for call management and routing
 - **Infrastructure**: FastAPI, Redis, Docker, Kubernetes
@@ -94,8 +95,9 @@ The system leverages the following technology stack:
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐            │
 │  │    🎤       │    │    📝       │    │    🤖       │    │    🔊       │            │
 │  │  DEEPGRAM   │───▶│   EVENTS    │───▶│   AGENT     │───▶│ ELEVENLABS  │            │
-│  │ (Speech-to- │    │  MANAGER    │    │ PROCESSING  │    │(Text-to-    │            │
-│  │   Text)     │    │(Transcript) │    │(AI Response)│    │ Speech)     │            │
+│  │ (Speech-to- │    │  MANAGER    │    │ PROCESSING  │    │   / 60db    │            │
+│  │   Text)     │    │(Transcript) │    │(AI Response)│    │(Text-to-    │            │
+│  │             │    │             │    │             │    │ Speech)     │            │
 │  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘            │
 │         ▲                                      │                   │                 │
 │         │                                      ▼                   ▼                 │
@@ -126,7 +128,7 @@ The system leverages the following technology stack:
 │                                                                                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │
 │  │ 🌐 TWILIO   │  │ 🎤 DEEPGRAM │  │ 🧠 OPENAI   │  │ 🔊 ELEVEN   │                  │
-│  │ Telephony   │  │ Speech-to-  │  │ Language    │  │ LABS        │                  │
+│  │ Telephony   │  │ Speech-to-  │  │ Language    │  │ LABS / 60db │                  │
 │  │ Platform    │  │ Text API    │  │ Model API   │  │ Text-to-    │                  │
 │  │             │  │             │  │             │  │ Speech API  │                  │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘                  │
@@ -159,11 +161,11 @@ Call Handler ──▶ VoiceBotEventsManager ──▶ Agent Factory ──▶ S
 
 #### 3. **Real-Time Voice Processing Pipeline**
 ```
-User Audio ──▶ Deepgram ──▶ Text ──▶ AI Agent ──▶ Response ──▶ ElevenLabs ──▶ Audio ──▶ User
+User Audio ──▶ Deepgram ──▶ Text ──▶ AI Agent ──▶ Response ──▶ ElevenLabs / 60db ──▶ Audio ──▶ User
 ```
 - **Step 1**: Deepgram converts speech to text in real-time
 - **Step 2**: Selected agent (ChatGPT/Speller) processes the text
-- **Step 3**: ElevenLabs synthesizes AI response back to audio
+- **Step 3**: The configured TTS provider (ElevenLabs or 60db, per `TTS_PROVIDER`) synthesizes the AI response back to audio
 - **Step 4**: Twilio streams audio response to user
 
 #### 4. **Agent Types & Processing**
@@ -192,7 +194,8 @@ User Audio ──▶ Deepgram ──▶ Text ──▶ AI Agent ──▶ Respon
 ### API Keys Required
 - **Deepgram**: Speech transcription services
 - **OpenAI**: Language model and conversation management
-- **ElevenLabs**: Text-to-speech synthesis
+- **ElevenLabs**: Text-to-speech synthesis (default TTS provider)
+- **60db** _(optional)_: Alternative text-to-speech provider, enabled with `TTS_PROVIDER=60db`
 - **Twilio**: Telephony services and phone number management
 
 ### Development Tools (Optional)
@@ -269,7 +272,8 @@ Ensure your environment variables are configured, then execute:
 
 ```bash
 poetry install
-poetry run python outbound_call.py
+# Run as a module from the repo root so package-relative imports resolve.
+poetry run python -m app.outbound_call
 ```
 
 ## Monitoring and Observability
@@ -414,11 +418,38 @@ You are a professional customer service representative for [Your Company].
 - **Alternative**: Configure custom transcription services through Vocode
 
 ### Synthesizer Options
-- **Default**: ElevenLabs (high-quality voice synthesis)
-  - Natural-sounding voices
-  - Emotional expression
-  - Multiple voice options
-- **Alternative**: Configure alternative TTS providers
+
+The TTS provider is selected at runtime with the `TTS_PROVIDER` environment
+variable — no code changes required. Both providers run at telephony-native
+MULAW / 8000 Hz, and the choice applies to inbound and outbound calls alike.
+
+- **`elevenlabs`** (default): ElevenLabs high-quality voice synthesis
+  - Natural-sounding voices, emotional expression, multiple voice options
+  - Uses ElevenLabs' low-latency experimental websocket streaming for inbound calls
+- **`60db`**: [60db](https://60db.ai) voice synthesis
+  - Implemented as a custom Vocode synthesizer (`app/sixtydb_synthesizer.py`)
+    streaming over 60db's WebSocket TTS API (`wss://api.60db.ai/ws/tts`)
+  - Emits G.711 μ-law at 8 kHz directly, so no transcoding is needed for Twilio
+  - Registered with the telephony server via `VoiceBotSynthesizerFactory`
+    (`app/synthesizer_factory.py`); ElevenLabs keeps working unchanged
+
+**Switching to 60db:**
+
+```env
+TTS_PROVIDER=60db
+SIXTYDB_API_KEY=your_60db_api_key
+SIXTYDB_VOICE_ID=your_60db_voice_id   # from GET https://api.60db.ai/myvoices
+# Optional tuning (defaults shown)
+SIXTYDB_SPEED=1.0
+SIXTYDB_STABILITY=50
+SIXTYDB_SIMILARITY=75
+```
+
+To list your available 60db voices and their IDs:
+
+```bash
+curl https://api.60db.ai/myvoices -H "Authorization: Bearer $SIXTYDB_API_KEY"
+```
 
 ## Advanced Configuration
 
@@ -439,8 +470,20 @@ TO_PHONE=+1234567890
 DEEPGRAM_API_KEY=your_deepgram_api_key
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Text-to-Speech provider: "elevenlabs" (default) or "60db"
+TTS_PROVIDER=elevenlabs
+
+# ElevenLabs (used when TTS_PROVIDER=elevenlabs)
 ELEVEN_LABS_API_KEY=your_eleven_labs_api_key
 ELEVEN_LABS_VOICE_ID=your_preferred_voice_id
+
+# 60db (used when TTS_PROVIDER=60db)
+SIXTYDB_API_KEY=your_60db_api_key
+SIXTYDB_VOICE_ID=your_60db_voice_id
+SIXTYDB_SPEED=1.0
+SIXTYDB_STABILITY=50
+SIXTYDB_SIMILARITY=75
 
 # Redis Configuration (Optional)
 REDIS_URL=redis://localhost:6379
@@ -673,7 +716,13 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Changelog
 
-### v1.0.0 (Current)
+### Unreleased
+- Added **60db** as a selectable text-to-speech provider alongside ElevenLabs, switchable via the `TTS_PROVIDER` environment variable (no code changes required)
+- New custom Vocode synthesizer (`app/sixtydb_synthesizer.py`) streaming 60db's WebSocket TTS at telephony-native μ-law / 8 kHz
+- New synthesizer factory (`app/synthesizer_factory.py`) and provider selector (`app/tts_config.py`)
+- Outbound script now runs as a module: `poetry run python -m app.outbound_call`
+
+### v1.0.0
 - Initial release with Vocode integration
 - Support for Deepgram, OpenAI, and ElevenLabs
 - Docker and Kubernetes deployment support
@@ -682,7 +731,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 - Multiple agent types (ChatGPT, Speller)
 
 ### Roadmap
-- [ ] Support for additional TTS providers
+- [x] Support for additional TTS providers (60db added)
+- [ ] Support for further TTS providers
 - [ ] Advanced conversation analytics
 - [ ] Multi-language support
 - [ ] Call recording and playback features
